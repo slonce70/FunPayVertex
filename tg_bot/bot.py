@@ -790,6 +790,8 @@ class TGBot:
         node_id, username, order_id, no_refund = int(split[1]), split[2], split[3], bool(int(split[4]))
         self.bot.edit_message_reply_markup(c.message.chat.id, c.message.id,
                                            reply_markup=kb.new_order(order_id, username, node_id, no_refund=no_refund))
+        # Подтверждаем callback, чтобы не показывался тайм-аут в клиенте Telegram
+        self.bot.answer_callback_query(c.id)
 
     # Панель управления
     def open_cp(self, c: CallbackQuery):

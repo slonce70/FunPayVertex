@@ -253,10 +253,32 @@ def message_hook(vertex: Vertex, event: NewMessageEvent):
         with open("storage/cache/advProfileStat.json", "w", encoding="UTF-8") as f:
             f.write(json.dumps(ORDER_CONFIRMED, indent=4, ensure_ascii=False))
 
-def extract_float(text):
-    cleaned_text = re.sub(r'[^\d.,]', '', text)
-    cleaned_text = cleaned_text.replace(',', '')
-    return float(cleaned_text)
+def extract_float(text: str) -> float:
+    """
+    Преобразует строку с ценой в число с плавающей точкой.
+    Поддерживает форматы с пробелами/неразрывными пробелами и запятой/точкой как разделителем.
+    """
+    # Удаляем все, кроме цифр и разделителей, а также пробелы/неразрывные пробелы
+    s = re.sub(r"[^\d,\.]", "", text).replace("\u00A0", "").replace(" ", "")
+    if not s:
+        return 0.0
+    # Если присутствуют и точка, и запятая — считаем правый разделитель десятичным, остальные убираем
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            # десятичный разделитель — запятая
+            s = s.replace(".", "")
+            s = s.replace(",", ".")
+        else:
+            # десятичный разделитель — точка
+            s = s.replace(",", "")
+    else:
+        # Только запятая — заменяем на точку
+        if "," in s:
+            s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
 
 def get_sales(account: Account, start_from: str | None = None, include_paid: bool = True, include_closed: bool = True,
               include_refunded: bool = True, exclude_ids: list[str] | None = None,
