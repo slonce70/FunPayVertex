@@ -321,20 +321,23 @@ def get_sales(account: Account, start_from: str | None = None, include_paid: boo
     return next_order_id, sells
 
 def generate_adv_profile(vertex: Vertex) -> str:
+    """
+    Генерирует расширенную статистику профиля.
+    Защита от ошибок парсинга: при сбое возвращает частичные данные без падения.
+    """
     account = vertex.account
     balance = vertex.balance
-    if balance.total_eur != 0:
-        currency = "€"
-        balance.balance.total_eur
-    elif balance.total_eur != 0:
-        currency = "$"
-        balance.balance.total_eur
-    elif balance.total_eur != 0:
-        currency = "₽"
-        balance.balance.total_eur
+
+    # Выбираем валюту и базовое числовое значение из объекта баланса
+    # (без сетевых запросов и без перезаписи переменной balance)
+    if balance.total_eur:
+        currency, balance_value = "€", balance.total_eur
+    elif balance.total_usd:
+        currency, balance_value = "$", balance.total_usd
+    elif balance.total_rub:
+        currency, balance_value = "₽", balance.total_rub
     else:
-        balance = 0
-        currency = "₽"
+        currency, balance_value = "₽", 0.0
     if exists("storage/cache/advProfileStat.json"):
         with open("storage/cache/advProfileStat.json", "r", encoding="utf-8") as f:
             global ORDER_CONFIRMED
@@ -345,7 +348,7 @@ def generate_adv_profile(vertex: Vertex) -> str:
     refundsPrice = {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0}
     canWithdraw = {"now": 0.0, "hour": 0.0, "day": 0.0, "2day": 0.0}
 
-    account.get()
+    # Лишний сетевой запрос не выполняем: данные обновляются перед вызовом
 
     for order in ORDER_CONFIRMED.copy():
         if time.time() - ORDER_CONFIRMED[order]["time"] > 172800:
@@ -358,24 +361,47 @@ def generate_adv_profile(vertex: Vertex) -> str:
         else:
             canWithdraw["2day"] += ORDER_CONFIRMED[order]["price"]
 
-    randomLotPageLink = bs(account.method("get", "https://funpay.com/lots/693/", {}, {}).text, "html.parser").find("a", {"class": "tc-item"})["href"]
-    randomLotPageParse = bs(account.method("get", randomLotPageLink, {}, {}).text, "html.parser")
+    # Пытаемся получить актуальный выводимый баланс и валюту из страницы лота.
+    # Если верстка поменялась — используем fallback из объекта баланса.
+    try:
+        randomLotPageLink = bs(account.method("get", "https://funpay.com/lots/693/", {}, {}).text, "html.parser").find("a", {"class": "tc-item"})["href"]
+        randomLotPageParse = bs(account.method("get", randomLotPageLink, {}, {}).text, "html.parser")
 
-    balance = randomLotPageParse.select_one(".badge-balance").text.split(" ")[0]
-    currency = randomLotPageParse.select_one(".badge-balance").text.split(" ")[1]
+        parsed_balance_text = randomLotPageParse.select_one(".badge-balance").text.split(" ")
+        balance_text_value, balance_text_currency = parsed_balance_text[0], parsed_balance_text[1]
 
-    canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-rub"]
-    if currency == "$":
-        canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-usd"]
-    elif currency == "€":
-        canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-eur"]
+        # Обновляем валюту и отображаемый баланс из страницы, если получилось распарсить
+        currency = balance_text_currency
+        balance_display = balance_text_value
 
-    next_order_id, all_sales = get_sales(account)
+        selectpicker = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})
+        if currency == "₽":
+            canWithdraw["now"] = str(selectpicker.get("data-balance-rub", 0) or 0)
+        elif currency == "$":
+            canWithdraw["now"] = str(selectpicker.get("data-balance-usd", 0) or 0)
+        elif currency == "€":
+            canWithdraw["now"] = str(selectpicker.get("data-balance-eur", 0) or 0)
+        else:
+            canWithdraw["now"] = "0"
+    except Exception:
+        # Fallback: используем доступный баланс по выбранной валюте из объекта баланса
+        if currency == "₽":
+            canWithdraw["now"] = str(balance.available_rub)
+        elif currency == "$":
+            canWithdraw["now"] = str(balance.available_usd)
+        elif currency == "€":
+            canWithdraw["now"] = str(balance.available_eur)
+        balance_display = f"{balance_value}"
 
-    while next_order_id != None:
-        time.sleep(1)
-        next_order_id, new_sales = get_sales(account, start_from=next_order_id)
-        all_sales += new_sales
+    # Пагинация продаж может быть длительной/нестабильной — обрабатываем сбои и ограничиваемся доступным
+    try:
+        next_order_id, all_sales = get_sales(account)
+        while next_order_id is not None:
+            time.sleep(1)
+            next_order_id, new_sales = get_sales(account, start_from=next_order_id)
+            all_sales += new_sales
+    except Exception:
+        all_sales = []
 
     for sale in all_sales:
         if sale.status == OrderStatuses.REFUNDED:
@@ -427,7 +453,7 @@ def generate_adv_profile(vertex: Vertex) -> str:
     return f"""Статистика аккаунта <b><i>{account.username}</i></b>
 
 <b>ID:</b> <code>{account.id}</code>
-<b>Баланс:</b> <code>{balance} {currency}</code>
+<b>Баланс:</b> <code>{balance_display} {currency}</code>
 <b>Незавершенных заказов:</b> <code>{account.active_sales}</code>
 
 <b>Доступно для вывода</b>
