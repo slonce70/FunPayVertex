@@ -426,42 +426,88 @@ def generate_adv_profile(vertex: Vertex) -> str:
     except Exception:
         all_sales = []
 
+    # Инициализируем агрегаты по валютам
+    currencies = ["USD", "RUB", "EUR"]
+    sym = {"USD": "$", "RUB": "₽", "EUR": "€"}
+    stats = {
+        cur: {
+            "sales": {"day": 0, "week": 0, "month": 0, "all": 0},
+            "salesPrice": {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0},
+            "refunds": {"day": 0, "week": 0, "month": 0, "all": 0},
+            "refundsPrice": {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0},
+        }
+        for cur in currencies
+    }
+
     now_dt = datetime.datetime.now()
     for sale in all_sales:
+        cur = getattr(sale, "currency", None)
+        if cur not in stats:
+            # неизвестная валюта — пропускаем
+            continue
         is_refund = sale.status == OrderStatuses.REFUNDED
         delta = now_dt - sale.date if hasattr(sale, "date") else datetime.timedelta.max
 
         if is_refund:
-            refunds["all"] += 1
-            refundsPrice["all"] += sale.price
+            stats[cur]["refunds"]["all"] += 1
+            stats[cur]["refundsPrice"]["all"] += sale.price
         else:
-            sales["all"] += 1
-            salesPrice["all"] += sale.price
+            stats[cur]["sales"]["all"] += 1
+            stats[cur]["salesPrice"]["all"] += sale.price
 
         # За сутки / неделю / месяц считаем по относительному времени
         if delta <= datetime.timedelta(days=1):
             if is_refund:
-                refunds["day"] += 1
-                refundsPrice["day"] += sale.price
+                stats[cur]["refunds"]["day"] += 1
+                stats[cur]["refundsPrice"]["day"] += sale.price
             else:
-                sales["day"] += 1
-                salesPrice["day"] += sale.price
+                stats[cur]["sales"]["day"] += 1
+                stats[cur]["salesPrice"]["day"] += sale.price
         if delta <= datetime.timedelta(days=7):
             if is_refund:
-                refunds["week"] += 1
-                refundsPrice["week"] += sale.price
+                stats[cur]["refunds"]["week"] += 1
+                stats[cur]["refundsPrice"]["week"] += sale.price
             else:
-                sales["week"] += 1
-                salesPrice["week"] += sale.price
+                stats[cur]["sales"]["week"] += 1
+                stats[cur]["salesPrice"]["week"] += sale.price
         if delta <= datetime.timedelta(days=30):
             if is_refund:
-                refunds["month"] += 1
-                refundsPrice["month"] += sale.price
+                stats[cur]["refunds"]["month"] += 1
+                stats[cur]["refundsPrice"]["month"] += sale.price
             else:
-                sales["month"] += 1
-                salesPrice["month"] += sale.price
+                stats[cur]["sales"]["month"] += 1
+                stats[cur]["salesPrice"]["month"] += sale.price
 
 
+
+    # Формируем блоки статистики по валютам
+    sales_blocks = []
+    refunds_blocks = []
+    for cur in currencies:
+        # Показываем только если есть данные по всем времени
+        if stats[cur]["sales"]["all"] or stats[cur]["refunds"]["all"]:
+            s = stats[cur]["sales"]
+            sp = stats[cur]["salesPrice"]
+            r = stats[cur]["refunds"]
+            rp = stats[cur]["refundsPrice"]
+            curr_sym = sym[cur]
+            sales_blocks.append(
+                f"<b>{curr_sym}</b>\n"
+                f"<b>За день:</b> <code>{s['day']} ({sp['day']:.1f} {curr_sym})</code>\n"
+                f"<b>За неделю:</b> <code>{s['week']} ({sp['week']:.1f} {curr_sym})</code>\n"
+                f"<b>За месяц:</b> <code>{s['month']} ({sp['month']:.1f} {curr_sym})</code>\n"
+                f"<b>За всё время:</b> <code>{s['all']} ({sp['all']:.1f} {curr_sym})</code>"
+            )
+            refunds_blocks.append(
+                f"<b>{curr_sym}</b>\n"
+                f"<b>За день:</b> <code>{r['day']} ({rp['day']:.1f} {curr_sym})</code>\n"
+                f"<b>За неделю:</b> <code>{r['week']} ({rp['week']:.1f} {curr_sym})</code>\n"
+                f"<b>За месяц:</b> <code>{r['month']} ({rp['month']:.1f} {curr_sym})</code>\n"
+                f"<b>За всё время:</b> <code>{r['all']} ({rp['all']:.1f} {curr_sym})</code>"
+            )
+
+    sales_text = "\n\n".join(sales_blocks) if sales_blocks else "<i>Нет данных</i>"
+    refunds_text = "\n\n".join(refunds_blocks) if refunds_blocks else "<i>Нет данных</i>"
 
     return f"""Статистика аккаунта <b><i>{account.username}</i></b>
 
@@ -475,17 +521,11 @@ def generate_adv_profile(vertex: Vertex) -> str:
 <b>Через день:</b> <code>+{"{:.1f}".format(canWithdraw["day"])} {currency}</code>
 <b>Через 2 дня:</b> <code>+{"{:.1f}".format(canWithdraw["2day"])} {currency}</code>
 
-<b>Товаров продано</b>
-<b>За день:</b> <code>{sales["day"]} ({"{:.1f}".format(salesPrice["day"])} {currency})</code>
-<b>За неделю:</b> <code>{sales["week"]} ({"{:.1f}".format(salesPrice["week"])} {currency})</code>
-<b>За месяц:</b> <code>{sales["month"]} ({"{:.1f}".format(salesPrice["month"])} {currency})</code>
-<b>За всё время:</b> <code>{sales["all"]} ({"{:.1f}".format(salesPrice["all"])} {currency})</code>
+<b>Товаров продано (по валютам)</b>
+{sales_text}
 
-<b>Товаров возвращено</b>
-<b>За день:</b> <code>{refunds["day"]} ({"{:.1f}".format(refundsPrice["day"])} {currency})</code>
-<b>За неделю:</b> <code>{refunds["week"]} ({"{:.1f}".format(refundsPrice["week"])} {currency})</code>
-<b>За месяц:</b> <code>{refunds["month"]} ({"{:.1f}".format(refundsPrice["month"])} {currency})</code>
-<b>За всё время:</b> <code>{refunds["all"]} ({"{:.1f}".format(refundsPrice["all"])} {currency})</code>
+<b>Товаров возвращено (по валютам)</b>
+{refunds_text}
 
 <i>Обновлено:</i>  <code>{time.strftime('%H:%M:%S', time.localtime(account.last_update))}</code>"""
 
