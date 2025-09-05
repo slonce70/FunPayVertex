@@ -21,6 +21,7 @@ import tg_bot.CBT
 from bs4 import BeautifulSoup
 from FunPayAPI.account import Account
 from FunPayAPI.types import OrderStatuses
+import FunPayAPI.types as types
 from FunPayAPI.updater.events import *
 localizer = Localizer()
 _ = localizer.translate
