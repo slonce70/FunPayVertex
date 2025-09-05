@@ -416,55 +416,45 @@ def generate_adv_profile(vertex: Vertex) -> str:
             canWithdraw["now"] = str(balance.available_eur)
         balance_display = f"{balance_value}"
 
-    # Пагинация продаж может быть длительной/нестабильной — обрабатываем сбои и ограничиваемся доступным
+    # Получаем продажи через встроенный метод API с пагинацией
     try:
-        next_order_id, all_sales = get_sales(account)
+        next_order_id, all_sales = account.get_sells()
         while next_order_id is not None:
             time.sleep(1)
-            next_order_id, new_sales = get_sales(account, start_from=next_order_id)
+            next_order_id, new_sales = account.get_sells(start_from=next_order_id)
             all_sales += new_sales
     except Exception:
         all_sales = []
 
+    now_dt = datetime.datetime.now()
     for sale in all_sales:
-        if sale.status == OrderStatuses.REFUNDED:
+        is_refund = sale.status == OrderStatuses.REFUNDED
+        delta = now_dt - sale.date if hasattr(sale, "date") else datetime.timedelta.max
+
+        if is_refund:
             refunds["all"] += 1
             refundsPrice["all"] += sale.price
         else:
             sales["all"] += 1
             salesPrice["all"] += sale.price
 
-        upperDate = bs(sale.html, "html.parser").find("div", {"class": "tc-date-time"}).text
-        date = bs(sale.html, "html.parser").find("div", {"class": "tc-date-left"}).text
-
-        if "сегодня" in upperDate or "сьогодні" in upperDate or "today" in upperDate:
-            if sale.status == OrderStatuses.REFUNDED:
+        # За сутки / неделю / месяц считаем по относительному времени
+        if delta <= datetime.timedelta(days=1):
+            if is_refund:
                 refunds["day"] += 1
-                refunds["week"] += 1
-                refunds["month"] += 1
                 refundsPrice["day"] += sale.price
-                refundsPrice["week"] += sale.price
-                refundsPrice["month"] += sale.price
             else:
                 sales["day"] += 1
-                sales["week"] += 1
-                sales["month"] += 1
                 salesPrice["day"] += sale.price
-                salesPrice["week"] += sale.price
-                salesPrice["month"] += sale.price
-        elif "день" in date or "дня" in date or "дней" in date or "дні" in date or "day" in date or "час" in date or "hour" in date or "годин" in date:
-            if sale.status == OrderStatuses.REFUNDED:
+        if delta <= datetime.timedelta(days=7):
+            if is_refund:
                 refunds["week"] += 1
-                refunds["month"] += 1
                 refundsPrice["week"] += sale.price
-                refundsPrice["month"] += sale.price
             else:
                 sales["week"] += 1
-                sales["month"] += 1
                 salesPrice["week"] += sale.price
-                salesPrice["month"] += sale.price
-        elif "недел" in date or "тижд" in date or "week" in date:
-            if sale.status == OrderStatuses.REFUNDED:
+        if delta <= datetime.timedelta(days=30):
+            if is_refund:
                 refunds["month"] += 1
                 refundsPrice["month"] += sale.price
             else:
